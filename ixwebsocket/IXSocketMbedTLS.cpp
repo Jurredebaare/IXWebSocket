@@ -1,12 +1,13 @@
 /*
  *  IXSocketMbedTLS.cpp
- *  Author: Benjamin Sergeant
- *  Copyright (c) 2019 Machine Zone, Inc. All rights reserved.
+ *  Author: Benjamin Sergeant, Max Weisel
+ *  Copyright (c) 2019-2020 Machine Zone, Inc. All rights reserved.
  *
  *  Some code taken from
  *  https://github.com/rottor12/WsClientLib/blob/master/lib/src/WsClientLib.cpp
  *  and mini_client.c example from mbedtls
  */
+#ifdef IXWEBSOCKET_USE_MBED_TLS
 
 #include "IXSocketMbedTLS.h"
 
@@ -103,10 +104,26 @@ namespace ix
             {
                 ; // FIXME
             }
-            else if (mbedtls_x509_crt_parse_file(&_cacert, _tlsOptions.caFile.c_str()) < 0)
+            else
             {
-                errMsg = "Cannot parse CA file '" + _tlsOptions.caFile + "'";
-                return false;
+                if (_tlsOptions.isUsingInMemoryCAs())
+                {
+                    const char* buffer = _tlsOptions.caFile.c_str();
+                    size_t bufferSize =
+                        _tlsOptions.caFile.size() + 1; // Needs to include null terminating
+                                                       // character otherwise mbedtls will fail.
+                    if (mbedtls_x509_crt_parse(
+                            &_cacert, (const unsigned char*) buffer, bufferSize) < 0)
+                    {
+                        errMsg = "Cannot parse CA from memory.";
+                        return false;
+                    }
+                }
+                else if (mbedtls_x509_crt_parse_file(&_cacert, _tlsOptions.caFile.c_str()) < 0)
+                {
+                    errMsg = "Cannot parse CA file '" + _tlsOptions.caFile + "'";
+                    return false;
+                }
             }
 
             mbedtls_ssl_conf_ca_chain(&_conf, &_cacert, NULL);
@@ -280,3 +297,5 @@ namespace ix
     }
 
 } // namespace ix
+
+#endif // IXWEBSOCKET_USE_MBED_TLS

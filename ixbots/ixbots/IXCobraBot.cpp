@@ -5,12 +5,13 @@
  */
 
 #include "IXCobraBot.h"
+
 #include "IXQueueManager.h"
+#include <ixcobra/IXCobraConnection.h>
+#include <ixcore/utils/IXCoreLogger.h>
 
 #include <algorithm>
 #include <chrono>
-#include <ixcobra/IXCobraConnection.h>
-#include <spdlog/spdlog.h>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -34,10 +35,10 @@ namespace ix
         Json::FastWriter jsonWriter;
         std::atomic<uint64_t> sentCount(0);
         std::atomic<uint64_t> receivedCount(0);
-        std::atomic<uint64_t> sentCountTotal(0);
-        std::atomic<uint64_t> receivedCountTotal(0);
-        std::atomic<uint64_t> sentCountPerSecs(0);
-        std::atomic<uint64_t> receivedCountPerSecs(0);
+        uint64_t sentCountTotal(0);
+        uint64_t receivedCountTotal(0);
+        uint64_t sentCountPerSecs(0);
+        uint64_t receivedCountPerSecs(0);
         std::atomic<bool> stop(false);
         std::atomic<bool> throttled(false);
         std::atomic<bool> fatalCobraError(false);
@@ -58,11 +59,17 @@ namespace ix
                 // as those are used externally, so we need to introduce
                 // our own counters
                 //
-                spdlog::info("messages received {} {} sent {} {}",
-                             receivedCountPerSecs,
-                             receivedCountTotal,
-                             sentCountPerSecs,
-                             sentCountTotal);
+                std::stringstream ss;
+                ss << "messages received "
+                   << receivedCountPerSecs
+                   << " "
+                   << receivedCountTotal
+                   << " sent " 
+                   << sentCountPerSecs
+                   << " "
+                   << sentCountTotal;
+                CoreLogger::info(ss.str());
+
                 receivedCountPerSecs = receivedCount - receivedCountTotal;
                 sentCountPerSecs = sentCount - receivedCountTotal;
 
@@ -73,7 +80,7 @@ namespace ix
                 std::this_thread::sleep_for(duration);
             }
 
-            spdlog::info("timer thread done");
+            CoreLogger::info("timer thread done");
         };
 
         std::thread t1(timer);
@@ -93,7 +100,7 @@ namespace ix
 
                 if (currentState == state)
                 {
-                    spdlog::error("no messages received or sent for 1 minute, exiting");
+                    CoreLogger::error("no messages received or sent for 1 minute, exiting");
                     exit(1);
                 }
                 state = currentState;
@@ -102,14 +109,13 @@ namespace ix
                 std::this_thread::sleep_for(duration);
             }
 
-            spdlog::info("heartbeat thread done");
+            CoreLogger::info("heartbeat thread done");
         };
 
         std::thread t2(heartbeat);
 
         auto sender =
             [this, &queueManager, verbose, &sentCount, &stop, &throttled, &fatalCobraError] {
-
                 while (true)
                 {
                     auto data = queueManager.pop();
@@ -119,24 +125,25 @@ namespace ix
                     if (stop) break;
                     if (msg.isNull()) continue;
 
-                    if (_onBotMessageCallback && _onBotMessageCallback(msg, position, verbose, throttled, fatalCobraError))
+                    if (_onBotMessageCallback &&
+                        _onBotMessageCallback(msg, position, verbose, throttled, fatalCobraError))
                     {
                         // That might be too noisy
                         if (verbose)
                         {
-                            spdlog::info("cobra bot: sending succesfull");
+                            CoreLogger::info("cobra bot: sending succesfull");
                         }
                         ++sentCount;
                     }
                     else
                     {
-                        spdlog::error("cobra bot: error sending");
+                        CoreLogger::error("cobra bot: error sending");
                     }
 
                     if (stop) break;
                 }
 
-                spdlog::info("sender thread done");
+                CoreLogger::info("sender thread done");
             };
 
         std::thread t3(sender);
@@ -155,34 +162,43 @@ namespace ix
                                &fatalCobraError,
                                &useQueue,
                                &queueManager,
-                               &sentCount](const CobraEventPtr& event)
-       {
+                               &sentCount](const CobraEventPtr& event) {
             if (event->type == ix::CobraEventType::Open)
             {
-                spdlog::info("Subscriber connected");
+                CoreLogger::info("Subscriber connected");
 
                 for (auto&& it : event->headers)
                 {
-                    spdlog::info("{}: {}", it.first, it.second);
+                    CoreLogger::info(it.first + "::" + it.second);
                 }
             }
             else if (event->type == ix::CobraEventType::Closed)
             {
-                spdlog::info("Subscriber closed: {}", event->errMsg);
+                CoreLogger::info("Subscriber closed: {}" + event->errMsg);
             }
             else if (event->type == ix::CobraEventType::Authenticated)
             {
-                spdlog::info("Subscriber authenticated");
-                spdlog::info("Subscribing to {} at position {}", channel, subscriptionPosition);
-                spdlog::info("Using filter: {}", filter);
+                CoreLogger::info("Subscriber authenticated");
+                CoreLogger::info("Subscribing to " + channel);
+                CoreLogger::info("Subscribing at position " + subscriptionPosition);
+                CoreLogger::info("Subscribing with filter " + filter);
                 conn.subscribe(channel,
                                filter,
                                subscriptionPosition,
-                               [this, &jsonWriter, verbose, &throttled, &receivedCount, &queueManager, &useQueue, &subscriptionPosition, &fatalCobraError, &sentCount](
-                                   const Json::Value& msg, const std::string& position) {
+                               [this,
+                                &jsonWriter,
+                                verbose,
+                                &throttled,
+                                &receivedCount,
+                                &queueManager,
+                                &useQueue,
+                                &subscriptionPosition,
+                                &fatalCobraError,
+                                &sentCount](const Json::Value& msg, const std::string& position) {
                                    if (verbose)
                                    {
-                                       spdlog::info("Subscriber received message {} -> {}", position, jsonWriter.write(msg));
+                                       CoreLogger::info("Subscriber received message "
+                                                        + position + " -> " + jsonWriter.write(msg));
                                    }
 
                                    subscriptionPosition = position;
@@ -201,55 +217,57 @@ namespace ix
                                    }
                                    else
                                    {
-                                       if (_onBotMessageCallback && _onBotMessageCallback(msg, position, verbose, throttled, fatalCobraError))
+                                       if (_onBotMessageCallback &&
+                                           _onBotMessageCallback(
+                                               msg, position, verbose, throttled, fatalCobraError))
                                        {
                                            // That might be too noisy
                                            if (verbose)
                                            {
-                                               spdlog::info("cobra bot: sending succesfull");
+                                               CoreLogger::info("cobra bot: sending succesfull");
                                            }
                                            ++sentCount;
                                        }
                                        else
                                        {
-                                           spdlog::error("cobra bot: error sending");
+                                           CoreLogger::error("cobra bot: error sending");
                                        }
                                    }
                                });
             }
             else if (event->type == ix::CobraEventType::Subscribed)
             {
-                spdlog::info("Subscriber: subscribed to channel {}", event->subscriptionId);
+                CoreLogger::info("Subscriber: subscribed to channel " + event->subscriptionId);
             }
             else if (event->type == ix::CobraEventType::UnSubscribed)
             {
-                spdlog::info("Subscriber: unsubscribed from channel {}", event->subscriptionId);
+                CoreLogger::info("Subscriber: unsubscribed from channel " + event->subscriptionId);
             }
             else if (event->type == ix::CobraEventType::Error)
             {
-                spdlog::error("Subscriber: error {}", event->errMsg);
+                CoreLogger::error("Subscriber: error " + event->errMsg);
             }
             else if (event->type == ix::CobraEventType::Published)
             {
-                spdlog::error("Published message hacked: {}", event->msgId);
+                CoreLogger::error("Published message hacked: " + std::to_string(event->msgId));
             }
             else if (event->type == ix::CobraEventType::Pong)
             {
-                spdlog::info("Received websocket pong: {}", event->errMsg);
+                CoreLogger::info("Received websocket pong: " + event->errMsg);
             }
             else if (event->type == ix::CobraEventType::HandshakeError)
             {
-                spdlog::error("Subscriber: Handshake error: {}", event->errMsg);
+                CoreLogger::error("Subscriber: Handshake error: " + event->errMsg);
                 fatalCobraError = true;
             }
             else if (event->type == ix::CobraEventType::AuthenticationError)
             {
-                spdlog::error("Subscriber: Authentication error: {}", event->errMsg);
+                CoreLogger::error("Subscriber: Authentication error: " + event->errMsg);
                 fatalCobraError = true;
             }
             else if (event->type == ix::CobraEventType::SubscriptionError)
             {
-                spdlog::error("Subscriber: Subscription error: {}", event->errMsg);
+                CoreLogger::error("Subscriber: Subscription error: " + event->errMsg);
                 fatalCobraError = true;
             }
         });
@@ -268,7 +286,7 @@ namespace ix
         // Run for a duration, used by unittesting now
         else
         {
-            for (int i = 0 ; i < runtime; ++i)
+            for (int i = 0; i < runtime; ++i)
             {
                 auto duration = std::chrono::seconds(1);
                 std::this_thread::sleep_for(duration);
@@ -300,4 +318,4 @@ namespace ix
     {
         _onBotMessageCallback = callback;
     }
-}
+} // namespace ix

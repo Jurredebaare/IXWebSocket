@@ -10,9 +10,9 @@
 #include "IXSnakeConnectionState.h"
 #include "nlohmann/json.hpp"
 #include <iostream>
+#include <ixcore/utils/IXCoreLogger.h>
 #include <ixcrypto/IXHMac.h>
 #include <ixwebsocket/IXWebSocket.h>
-#include <ixcore/utils/IXCoreLogger.h>
 #include <sstream>
 
 namespace snake
@@ -189,7 +189,8 @@ namespace snake
             nlohmann::json response = {
                 {"action", "rtm/subscription/data"},
                 {"id", id++},
-                {"body", {{"subscription_id", subscriptionId}, {"position", "0-0"}, {"messages", {msg}}}}};
+                {"body",
+                 {{"subscription_id", subscriptionId}, {"position", "0-0"}, {"messages", {msg}}}}};
 
             ws->sendText(response.dump());
         };
@@ -197,7 +198,7 @@ namespace snake
         auto responseCallback = [ws, pdu, &subscriptionId](const std::string& redisResponse) {
             std::stringstream ss;
             ss << "Redis Response: " << redisResponse << "...";
-            ix::IXCoreLogger::Log(ss.str().c_str());
+            ix::CoreLogger::log(ss.str().c_str());
 
             // Success
             nlohmann::json response = {{"action", "rtm/subscribe/ok"},
@@ -209,7 +210,7 @@ namespace snake
         {
             std::stringstream ss;
             ss << "Subscribing to " << appChannel << "...";
-            ix::IXCoreLogger::Log(ss.str().c_str());
+            ix::CoreLogger::log(ss.str().c_str());
         }
 
         if (!redisClient.subscribe(appChannel, responseCallback, callback))
@@ -261,8 +262,7 @@ namespace snake
             std::stringstream ss;
             ss << "malformed json pdu: " << e.what() << " -> " << str << "";
 
-            nlohmann::json response = {{"body", {{"error", "invalid_json"},
-                                                 {"reason", ss.str()}}}};
+            nlohmann::json response = {{"body", {{"error", "invalid_json"}, {"reason", ss.str()}}}};
             ws->sendText(response.dump());
             return;
         }

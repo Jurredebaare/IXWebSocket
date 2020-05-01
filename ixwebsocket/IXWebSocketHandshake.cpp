@@ -10,7 +10,7 @@
 #include "IXSocketConnect.h"
 #include "IXUrlParser.h"
 #include "IXUserAgent.h"
-#include "libwshandshake.hpp"
+#include "IXWebSocketHandshakeKeyGen.h"
 #include <algorithm>
 #include <iostream>
 #include <random>
@@ -133,7 +133,7 @@ namespace ix
 
         for (auto& it : extraHeaders)
         {
-            ss << it.first << ":" << it.second << "\r\n";
+            ss << it.first << ": " << it.second << "\r\n";
         }
 
         if (_enablePerMessageDeflate)

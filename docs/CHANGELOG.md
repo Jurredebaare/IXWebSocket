@@ -1,6 +1,30 @@
 # Changelog
 All changes to this project will be documented in this file.
 
+## [9.5.3] - 2020-04-29
+
+(http client) better current request cancellation support when the HttpClient destructor is invoked (see #189)
+
+## [9.5.2] - 2020-04-27
+
+(cmake) fix cmake broken tls option parsing
+
+## [9.5.1] - 2020-04-27
+
+(http client) Set default values for most HttpRequestArgs struct members (fix #185)
+
+## [9.5.0] - 2020-04-25
+
+(ssl) Default to OpenSSL on Windows, since it can load the system certificates by default
+
+## [9.4.1] - 2020-04-25
+
+(header) Add a space between header name and header value since most http parsers expects it, although it it not required. Cf #184 and #155
+
+## [9.4.0] - 2020-04-24
+
+(ssl) Add support for supplying SSL CA from memory, for OpenSSL and MbedTLS backends
+
 ## [9.3.3] - 2020-04-17
 
 (ixbots) display sent/receive message, per seconds as accumulated

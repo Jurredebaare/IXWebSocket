@@ -49,7 +49,6 @@ set( IXWEBSOCKET_SOURCES
     ixwebsocket/IXWebSocketPerMessageDeflateOptions.cpp
     ixwebsocket/IXWebSocketServer.cpp
     ixwebsocket/IXWebSocketTransport.cpp
-    ixwebsocket/LUrlParser.cpp
 )
 
 set( IXWEBSOCKET_HEADERS
@@ -80,6 +79,7 @@ set( IXWEBSOCKET_HEADERS
     ixwebsocket/IXWebSocketCloseInfo.h
     ixwebsocket/IXWebSocketErrorInfo.h
     ixwebsocket/IXWebSocketHandshake.h
+    ixwebsocket/IXWebSocketHandshakeKeyGen.h
     ixwebsocket/IXWebSocketHttpHeaders.h
     ixwebsocket/IXWebSocketInitResult.h
     ixwebsocket/IXWebSocketMessage.h
@@ -92,8 +92,6 @@ set( IXWEBSOCKET_HEADERS
     ixwebsocket/IXWebSocketServer.h
     ixwebsocket/IXWebSocketTransport.h
     ixwebsocket/IXWebSocketVersion.h
-    ixwebsocket/LUrlParser.h
-    ixwebsocket/libwshandshake.hpp
 )
 
 if (UNIX)
@@ -111,31 +109,33 @@ elseif (${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     list( APPEND IXWEBSOCKET_SOURCES ixwebsocket/freebsd/IXSetThreadName_freebsd.cpp)
 else()
     list( APPEND IXWEBSOCKET_SOURCES ixwebsocket/linux/IXSetThreadName_linux.cpp)
-    list( APPEND IXWEBSOCKET_SOURCES ixwebsocket/IXSelectInterruptEventFd.cpp)
-    list( APPEND IXWEBSOCKET_HEADERS ixwebsocket/IXSelectInterruptEventFd.h)
 endif()
 
 option(USE_TLS "Enable TLS support" FALSE)
 
 if (USE_TLS)
-    option(USE_MBED_TLS "Use Mbed TLS" OFF)
-    option(USE_OPEN_SSL "Use OpenSSL" OFF)
-
-    # default to mbedtls on windows if nothing is configured
-    if (WIN32 AND NOT USE_OPEN_SSL AND NOT USE_MBED_TLS)
-      option(USE_MBED_TLS "Use Mbed TLS" ON)
+    # default to securetranport on Apple if nothing is configured
+    if (APPLE)
+      if (NOT USE_MBED_TLS AND NOT USE_OPEN_SSL) # unless we want something else
+        set(USE_SECURE_TRANSPORT ON)
+      endif()
+    else() # default to OpenSSL on all other platforms
+      if (NOT USE_MBED_TLS) # Unless mbedtls is requested
+        set(USE_OPEN_SSL ON)
+      endif()
     endif()
 
     if (USE_MBED_TLS)
         list( APPEND IXWEBSOCKET_HEADERS ixwebsocket/IXSocketMbedTLS.h)
         list( APPEND IXWEBSOCKET_SOURCES ixwebsocket/IXSocketMbedTLS.cpp)
-    elseif (APPLE AND NOT USE_OPEN_SSL)
+    elseif (USE_SECURE_TRANSPORT)
         list( APPEND IXWEBSOCKET_HEADERS ixwebsocket/IXSocketAppleSSL.h)
         list( APPEND IXWEBSOCKET_SOURCES ixwebsocket/IXSocketAppleSSL.cpp)
-    else()
-        set(USE_OPEN_SSL ON)
+    elseif (USE_OPEN_SSL)
         list( APPEND IXWEBSOCKET_HEADERS ixwebsocket/IXSocketOpenSSL.h)
         list( APPEND IXWEBSOCKET_SOURCES ixwebsocket/IXSocketOpenSSL.cpp)
+    else()
+        message(FATAL_ERROR "TLS Configuration error: unknown backend")
     endif()
 endif()
 
@@ -150,55 +150,45 @@ if (USE_TLS)
         target_compile_definitions(ixwebsocket PUBLIC IXWEBSOCKET_USE_MBED_TLS)
     elseif (USE_OPEN_SSL)
         target_compile_definitions(ixwebsocket PUBLIC IXWEBSOCKET_USE_OPEN_SSL)
+    elseif (USE_SECURE_TRANSPORT)
+        target_compile_definitions(ixwebsocket PUBLIC IXWEBSOCKET_USE_SECURE_TRANSPORT)
+    else()
+        message(FATAL_ERROR "TLS Configuration error: unknown backend")
     endif()
 endif()
 
-if (APPLE AND USE_TLS AND NOT USE_MBED_TLS AND NOT USE_OPEN_SSL)
-  target_link_libraries(ixwebsocket "-framework foundation" "-framework security")
-endif()
+if (USE_TLS)
+  if (USE_OPEN_SSL)
+    message(STATUS "TLS configured to use openssl")
 
-if (WIN32)
-  target_link_libraries(ixwebsocket wsock32 ws2_32 shlwapi)
-  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-endif()
+    # Help finding Homebrew's OpenSSL on macOS
+    if (APPLE)
+      set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/local/opt/openssl/lib)
+      set(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH} /usr/local/opt/openssl/include)
+    endif()
 
-if (UNIX)
-  find_package(Threads)
-  target_link_libraries(ixwebsocket ${CMAKE_THREAD_LIBS_INIT})
-endif()
+    # This OPENSSL_FOUND check is to help find a cmake manually configured OpenSSL
+    if (NOT OPENSSL_FOUND)
+      find_package(OpenSSL REQUIRED)
+    endif()
+    message(STATUS "OpenSSL: " ${OPENSSL_VERSION})
 
-if (USE_TLS AND USE_OPEN_SSL)
+    add_definitions(${OPENSSL_DEFINITIONS})
+    target_include_directories(ixwebsocket PUBLIC ${OPENSSL_INCLUDE_DIR})
+    target_link_libraries(ixwebsocket ${OPENSSL_LIBRARIES})
+  elseif (USE_MBED_TLS)
+    message(STATUS "TLS configured to use mbedtls")
 
-  # Help finding Homebrew's OpenSSL on macOS
-  if (APPLE)
-    set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/local/opt/openssl/lib)
-    set(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH} /usr/local/opt/openssl/include)
-  endif()
-
-  if(NOT OPENSSL_FOUND)
-    find_package(OpenSSL REQUIRED)
-  endif()
-  add_definitions(${OPENSSL_DEFINITIONS})
-  message(STATUS "OpenSSL: " ${OPENSSL_VERSION})
-  include_directories(${OPENSSL_INCLUDE_DIR})
-  target_link_libraries(ixwebsocket ${OPENSSL_LIBRARIES})
-endif()
-
-if (USE_TLS AND USE_MBED_TLS)
-  # FIXME I'm not too sure that this USE_VENDORED_THIRD_PARTY thing works
-  if (USE_VENDORED_THIRD_PARTY)
-    set (ENABLE_PROGRAMS OFF)
-    add_subdirectory(third_party/mbedtls)
-    include_directories(third_party/mbedtls/include)
-
-    target_link_libraries(ixwebsocket mbedtls)
-  else()
     find_package(MbedTLS REQUIRED)
     target_include_directories(ixwebsocket PUBLIC ${MBEDTLS_INCLUDE_DIRS})
     target_link_libraries(ixwebsocket ${MBEDTLS_LIBRARIES})
+  elseif (USE_SECURE_TRANSPORT)
+    message(STATUS "TLS configured to use secure transport")
+    target_link_libraries(ixwebsocket "-framework foundation" "-framework security")
   endif()
 endif()
 
+# This ZLIB_FOUND check is to help find a cmake manually configured zlib
 if (NOT ZLIB_FOUND)
   find_package(ZLIB)
 endif()
@@ -210,6 +200,21 @@ else()
   add_subdirectory(third_party/zlib)
   target_link_libraries(ixwebsocket zlibstatic)
 endif()
+
+if (WIN32)
+  target_link_libraries(ixwebsocket wsock32 ws2_32 shlwapi)
+  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
+  if (USE_TLS)
+    target_link_libraries(ixwebsocket Crypt32)
+  endif()
+endif()
+
+if (UNIX)
+  find_package(Threads)
+  target_link_libraries(ixwebsocket ${CMAKE_THREAD_LIBS_INIT})
+endif()
+
 
 set( IXWEBSOCKET_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}
