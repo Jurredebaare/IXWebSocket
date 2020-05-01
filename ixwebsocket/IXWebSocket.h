@@ -70,6 +70,8 @@ namespace ix
         WebSocketInitResult connect(int timeoutSecs);
         void run();
 
+		void tick();
+
         // send is in text mode by default
         WebSocketSendInfo send(const std::string& data,
                                bool binary = false,
@@ -132,6 +134,8 @@ namespace ix
         std::atomic<bool> _stop;
         std::thread _thread;
         std::mutex _writeMutex;
+
+		bool _firstConnectionAttempt;
 
         // Automatic reconnection
         std::atomic<bool> _automaticReconnection;

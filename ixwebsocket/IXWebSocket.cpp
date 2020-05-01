@@ -25,6 +25,7 @@ namespace ix
     WebSocket::WebSocket()
         : _onMessageCallback(OnMessageCallback())
         , _stop(false)
+		, _firstConnectionAttempt(true)
         , _automaticReconnection(true)
         , _maxWaitBetweenReconnectionRetries(kDefaultMaxWaitBetweenReconnectionRetries)
         , _handshakeTimeoutSecs(kDefaultHandShakeTimeoutSecs)
@@ -324,82 +325,85 @@ namespace ix
     {
         setThreadName(getUrl());
 
-        bool firstConnectionAttempt = true;
-
         while (true)
         {
-            // 1. Make sure we are always connected
-            checkConnection(firstConnectionAttempt);
-
-            firstConnectionAttempt = false;
-
-            // if here we are closed then checkConnection was not able to connect
-            if (getReadyState() == ReadyState::Closed)
-            {
-                break;
-            }
-
-            // We can avoid to poll if we want to stop and are not closing
-            if (_stop && !isClosing()) break;
-
-            // 2. Poll to see if there's any new data available
-            WebSocketTransport::PollResult pollResult = _ws.poll();
-
-            // 3. Dispatch the incoming messages
-            _ws.dispatch(
-                pollResult,
-                [this](const std::string& msg,
-                       size_t wireSize,
-                       bool decompressionError,
-                       WebSocketTransport::MessageKind messageKind) {
-                    WebSocketMessageType webSocketMessageType;
-                    switch (messageKind)
-                    {
-                        case WebSocketTransport::MessageKind::MSG_TEXT:
-                        case WebSocketTransport::MessageKind::MSG_BINARY:
-                        {
-                            webSocketMessageType = WebSocketMessageType::Message;
-                        }
-                        break;
-
-                        case WebSocketTransport::MessageKind::PING:
-                        {
-                            webSocketMessageType = WebSocketMessageType::Ping;
-                        }
-                        break;
-
-                        case WebSocketTransport::MessageKind::PONG:
-                        {
-                            webSocketMessageType = WebSocketMessageType::Pong;
-                        }
-                        break;
-
-                        case WebSocketTransport::MessageKind::FRAGMENT:
-                        {
-                            webSocketMessageType = WebSocketMessageType::Fragment;
-                        }
-                        break;
-                    }
-
-                    WebSocketErrorInfo webSocketErrorInfo;
-                    webSocketErrorInfo.decompressionError = decompressionError;
-
-                    bool binary = messageKind == WebSocketTransport::MessageKind::MSG_BINARY;
-
-                    _onMessageCallback(std::make_unique<WebSocketMessage>(webSocketMessageType,
-                                                                          msg,
-                                                                          wireSize,
-                                                                          webSocketErrorInfo,
-                                                                          WebSocketOpenInfo(),
-                                                                          WebSocketCloseInfo(),
-                                                                          binary));
-
-                    WebSocket::invokeTrafficTrackerCallback(wireSize, true);
-                });
+			tick();           
         }
     }
 
-    void WebSocket::setOnMessageCallback(const OnMessageCallback& callback)
+	void WebSocket::tick()
+	{
+		// 1. Make sure we are always connected
+		checkConnection(_firstConnectionAttempt);
+
+		_firstConnectionAttempt = false;
+
+		// if here we are closed then checkConnection was not able to connect
+		if (getReadyState() == ReadyState::Closed)
+		{
+			return;
+		}
+
+		// We can avoid to poll if we want to stop and are not closing
+		if (_stop && !isClosing()) return;
+
+		// 2. Poll to see if there's any new data available
+		WebSocketTransport::PollResult pollResult = _ws.poll();
+
+		// 3. Dispatch the incoming messages
+		_ws.dispatch(
+			pollResult,
+			[this](const std::string& msg,
+				size_t wireSize,
+				bool decompressionError,
+				WebSocketTransport::MessageKind messageKind) {
+			WebSocketMessageType webSocketMessageType;
+			switch (messageKind)
+			{
+			case WebSocketTransport::MessageKind::MSG_TEXT:
+			case WebSocketTransport::MessageKind::MSG_BINARY:
+			{
+				webSocketMessageType = WebSocketMessageType::Message;
+			}
+			break;
+
+			case WebSocketTransport::MessageKind::PING:
+			{
+				webSocketMessageType = WebSocketMessageType::Ping;
+			}
+			break;
+
+			case WebSocketTransport::MessageKind::PONG:
+			{
+				webSocketMessageType = WebSocketMessageType::Pong;
+			}
+			break;
+
+			case WebSocketTransport::MessageKind::FRAGMENT:
+			{
+				webSocketMessageType = WebSocketMessageType::Fragment;
+			}
+			break;
+			}
+
+			WebSocketErrorInfo webSocketErrorInfo;
+			webSocketErrorInfo.decompressionError = decompressionError;
+
+			bool binary = messageKind == WebSocketTransport::MessageKind::MSG_BINARY;
+
+			_onMessageCallback(std::make_unique<WebSocketMessage>(webSocketMessageType,
+				msg,
+				wireSize,
+				webSocketErrorInfo,
+				WebSocketOpenInfo(),
+				WebSocketCloseInfo(),
+				binary));
+
+			WebSocket::invokeTrafficTrackerCallback(wireSize, true);
+		});
+	}
+
+	void WebSocket::setOnMessageCallback(const OnMessageCallback& callback)
     {
         _onMessageCallback = callback;
     }
